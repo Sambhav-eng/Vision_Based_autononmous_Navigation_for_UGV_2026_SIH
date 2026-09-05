@@ -37,9 +37,16 @@ FAR_PLANE = 50
 
 
 #-----------------------------------------------Adding terrain to the simulation-------------------------------------------------
-# Terrain loading logic now lives in terrain_utils.py so camera.py and
-# simulation.py can't drift out of sync with each other again.
-from terrain_utils import get_terrain_texture_id, apply_ground_terrain, create_backdrop_wall
+# Terrain/ground/robot visual helpers now live in terrain_utils.py so camera.py
+# and simulation.py can't drift out of sync with each other again.
+from terrain_utils import (
+    get_horizon_texture_id,
+    get_ground_texture_id,
+    apply_ground_terrain,
+    create_backdrop_wall,
+    create_wheeled_ugv,
+    apply_realistic_scene_settings,
+)
 
 
 
@@ -58,39 +65,25 @@ def create_world():
     # Ground
     plane_id = p.loadURDF("plane.urdf")
 
-    # Load terrain image once (auto-resized if needed), reuse for ground + backdrop
     project_dir = os.path.dirname(__file__)
-    terrain_texture_id = get_terrain_texture_id(project_dir)
 
-    # Make the ground the UGV drives on look like real terrain
-    apply_ground_terrain(plane_id, terrain_texture_id)
+    # Seamless generated grass texture for the ground the UGV drives on
+    ground_texture_id = get_ground_texture_id(project_dir)
+    apply_ground_terrain(plane_id, ground_texture_id)
 
-    # Distant backdrop wall with the same terrain texture
-    create_backdrop_wall(terrain_texture_id)
+    # Your landscape photo goes on the distant backdrop wall instead -
+    # that's what it's actually suited for (sky/mountains/horizon)
+    horizon_texture_id = get_horizon_texture_id(project_dir)
+    create_backdrop_wall(horizon_texture_id)
 
-    # Shadows make the scene read as 3D instead of flat CAD boxes
-    p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
+    # Shadows + a nicely framed camera so the scene reads as 3D
+    apply_realistic_scene_settings()
+
     # -------------------------------------------------
-    # UGV
+    # UGV - proper wheeled chassis instead of a flat box
     # -------------------------------------------------
 
-    collision_shape = p.createCollisionShape(
-        p.GEOM_BOX,
-        halfExtents=[1.0, 0.6, 0.2]
-    )
-
-    visual_shape = p.createVisualShape(
-        p.GEOM_BOX,
-        halfExtents=[1.0, 0.6, 0.2],
-        rgbaColor=[0.2, 0.2, 0.8, 1]
-    )
-
-    ugv = p.createMultiBody(
-        baseMass=10,
-        baseCollisionShapeIndex=collision_shape,
-        baseVisualShapeIndex=visual_shape,
-        basePosition=[0, 0, 0.5]
-    )
+    ugv = create_wheeled_ugv(base_position=(0, 0, 0.35))
 
     # -------------------------------------------------
     # TEST OBSTACLES
@@ -113,7 +106,7 @@ def create_obstacle(position, half_extents):
     visual = p.createVisualShape(
         p.GEOM_BOX,
         halfExtents=half_extents,
-        rgbaColor=[1, 0, 0, 1]
+        rgbaColor=[1, 0, 0, 1]  # kept pure red - obstacle_detection.py thresholds on this color
     )
 
     obstacle = p.createMultiBody(

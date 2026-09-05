@@ -9,9 +9,15 @@ import os
 
 
 #----------------------------------Adding terrain to the simulation-------------------------------------------------
-# Terrain loading logic now lives in terrain_utils.py so camera.py and
+# Terrain/ground/scene helpers now live in terrain_utils.py so camera.py and
 # simulation.py can't drift out of sync with each other again.
-from terrain_utils import get_terrain_texture_id, apply_ground_terrain, create_backdrop_wall
+from terrain_utils import (
+    get_horizon_texture_id,
+    get_ground_texture_id,
+    apply_ground_terrain,
+    create_backdrop_wall,
+    apply_realistic_scene_settings,
+)
 
 
 
@@ -30,25 +36,19 @@ p.setGravity(0, 0, -9.81)
 
 plane_id = p.loadURDF("plane.urdf")
 
-# Load the terrain image once (auto-resized if needed), reuse for ground + backdrop
 project_dir = os.path.dirname(__file__)
-terrain_texture_id = get_terrain_texture_id(project_dir)
 
-# Make the ground the UGV drives on look like real terrain
-apply_ground_terrain(plane_id, terrain_texture_id)
+# Seamless generated grass/earth texture for the ground the UGV drives on
+ground_texture_id = get_ground_texture_id(project_dir)
+apply_ground_terrain(plane_id, ground_texture_id)
 
-# Create distant backdrop wall using the same terrain texture
-create_backdrop_wall(terrain_texture_id)
+# Your landscape photo goes on the distant backdrop wall instead -
+# that's what a photographic sky/mountain image is actually suited for
+horizon_texture_id = get_horizon_texture_id(project_dir)
+create_backdrop_wall(horizon_texture_id)
 
-# Make it look like a real environment: shadows + a camera angle that
-# actually frames the robot and the ground instead of the default top-down view
-p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
-p.resetDebugVisualizerCamera(
-    cameraDistance=6,
-    cameraYaw=50,
-    cameraPitch=-30,
-    cameraTargetPosition=[0, 0, 0.5]
-)
+# Shadows + a nicely framed camera so the scene reads as 3D
+apply_realistic_scene_settings()
 
 
 # ============================================================
@@ -83,7 +83,8 @@ chassis_visual = p.createVisualShape(
         body_length / 2,
         body_width / 2,
         body_height / 2
-    ]
+    ],
+    rgbaColor=[0.15, 0.15, 0.17, 1]  # dark gunmetal chassis, reads as a real rover
 )
 
 
@@ -100,7 +101,8 @@ wheel_collision = p.createCollisionShape(
 wheel_visual = p.createVisualShape(
     p.GEOM_CYLINDER,
     radius=wheel_radius,
-    length=wheel_width
+    length=wheel_width,
+    rgbaColor=[0.05, 0.05, 0.05, 1]  # black rubber tires
 )
 
 
