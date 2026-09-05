@@ -18,226 +18,306 @@
 # ├── move_robot()
 # │
 # └── close_simulation()
-#-------------------------------------------------------------------------------------------------------------------------------
-# This version creates a virtual camera that follows the UGV and displays the camera feed in an OpenCV window.
+
+
+# With RGB and Depth
 import pybullet as p
 import pybullet_data
-import cv2
 import numpy as np
-import os
 
 
-CAMERA_WIDTH = 640
-CAMERA_HEIGHT = 480
+# ============================================================
+# CAMERA SETTINGS
+# ============================================================
+
+WIDTH = 640
+HEIGHT = 480
 
 FOV = 70
-NEAR_PLANE = 0.1
-FAR_PLANE = 50
+NEAR = 0.1
+FAR = 50.0
 
 
-
-#-----------------------------------------------Adding terrain to the simulation-------------------------------------------------
-# Terrain loading logic now lives in terrain_utils.py so camera.py and
-# simulation.py can't drift out of sync with each other again.
-from terrain_utils import get_terrain_texture_id, apply_ground_terrain, create_backdrop_wall
-
-
+# ============================================================
+# CREATE WORLD
+# ============================================================
 
 def create_world():
 
     # Start PyBullet
-    if not p.isConnected():
-        p.connect(p.GUI)
+    p.connect(p.GUI)
 
-    p.setAdditionalSearchPath(pybullet_data.getDataPath())
-
+    # Reset simulation
     p.resetSimulation()
 
+    # Load PyBullet default assets
+    p.setAdditionalSearchPath(pybullet_data.getDataPath())
+
+    # Gravity
     p.setGravity(0, 0, -9.81)
 
     # Ground
-    plane_id = p.loadURDF("plane.urdf")
+    p.loadURDF("plane.urdf")
 
-    # Load terrain image once (auto-resized if needed), reuse for ground + backdrop
-    project_dir = os.path.dirname(__file__)
-    terrain_texture_id = get_terrain_texture_id(project_dir)
 
-    # Make the ground the UGV drives on look like real terrain
-    apply_ground_terrain(plane_id, terrain_texture_id)
+    # ========================================================
+    # CREATE UGV
+    # ========================================================
 
-    # Distant backdrop wall with the same terrain texture
-    create_backdrop_wall(terrain_texture_id)
-
-    # Shadows make the scene read as 3D instead of flat CAD boxes
-    p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
-    # -------------------------------------------------
-    # UGV
-    # -------------------------------------------------
-
-    collision_shape = p.createCollisionShape(
+    ugv_collision = p.createCollisionShape(
         p.GEOM_BOX,
-        halfExtents=[1.0, 0.6, 0.2]
+        halfExtents=[0.5, 0.35, 0.15]
     )
 
-    visual_shape = p.createVisualShape(
+    ugv_visual = p.createVisualShape(
         p.GEOM_BOX,
-        halfExtents=[1.0, 0.6, 0.2],
+        halfExtents=[0.5, 0.35, 0.15],
         rgbaColor=[0.2, 0.2, 0.8, 1]
     )
 
     ugv = p.createMultiBody(
         baseMass=10,
-        baseCollisionShapeIndex=collision_shape,
-        baseVisualShapeIndex=visual_shape,
-        basePosition=[0, 0, 0.5]
+        baseCollisionShapeIndex=ugv_collision,
+        baseVisualShapeIndex=ugv_visual,
+        basePosition=[0, 0, 0.3]
     )
 
-    # -------------------------------------------------
-    # TEST OBSTACLES
-    # -------------------------------------------------
 
-    create_obstacle([5, 0, 1], [0.5, 0.5, 1])
-    create_obstacle([8, 2, 0.75], [0.7, 0.7, 0.75])
-    create_obstacle([8, -2, 0.75], [0.7, 0.7, 0.75])
+    # ========================================================
+    # CREATE OBSTACLES
+    # ========================================================
+
+    obstacle_positions = [
+        [3, 0, 0.5],
+        [5, 2, 0.5],
+        [7, -2, 0.5]
+    ]
+
+    for position in obstacle_positions:
+
+        collision = p.createCollisionShape(
+            p.GEOM_BOX,
+            halfExtents=[0.5, 0.5, 0.5]
+        )
+
+        visual = p.createVisualShape(
+            p.GEOM_BOX,
+            halfExtents=[0.5, 0.5, 0.5],
+            rgbaColor=[1, 0, 0, 1]
+        )
+
+        p.createMultiBody(
+            baseMass=0,
+            baseCollisionShapeIndex=collision,
+            baseVisualShapeIndex=visual,
+            basePosition=position
+        )
+
 
     return ugv
 
 
-def create_obstacle(position, half_extents):
-
-    collision = p.createCollisionShape(
-        p.GEOM_BOX,
-        halfExtents=half_extents
-    )
-
-    visual = p.createVisualShape(
-        p.GEOM_BOX,
-        halfExtents=half_extents,
-        rgbaColor=[1, 0, 0, 1]
-    )
-
-    obstacle = p.createMultiBody(
-        baseMass=0,
-        baseCollisionShapeIndex=collision,
-        baseVisualShapeIndex=visual,
-        basePosition=position
-    )
-
-    return obstacle
-
+# ============================================================
+# CAMERA
+# ============================================================
 
 def get_camera_image(ugv):
 
-    # Get robot position
-    position, orientation = p.getBasePositionAndOrientation(ugv)
+    # --------------------------------------------------------
+    # Get UGV position and orientation
+    # --------------------------------------------------------
 
-    # Get robot yaw
-    _, _, yaw = p.getEulerFromQuaternion(orientation)
+    position, orientation = p.getBasePositionAndOrientation(
+        ugv
+    )
 
-    x, y, z = position
+    position = np.array(position)
 
-    # -------------------------------------------------
-    # CAMERA POSITION
-    # -------------------------------------------------
+    # Convert quaternion to rotation matrix
+    rotation = p.getMatrixFromQuaternion(
+        orientation
+    )
 
-    camera_distance = 0.8
+    rotation = np.array(rotation).reshape(3, 3)
 
-    camera_x = x + camera_distance * np.cos(yaw)
-    camera_y = y + camera_distance * np.sin(yaw)
-    camera_z = z + 0.4
 
-    camera_position = [
-        camera_x,
-        camera_y,
-        camera_z
-    ]
+    # --------------------------------------------------------
+    # Camera position
+    # --------------------------------------------------------
 
-    # -------------------------------------------------
-    # CAMERA TARGET
-    # -------------------------------------------------
+    # Camera is:
+    # 0.8 m in front of UGV
+    # 0.4 m above UGV
 
-    target_distance = 5
+    camera_offset = np.array([
+        0.8,
+        0.0,
+        0.4
+    ])
 
-    target_x = x + target_distance * np.cos(yaw)
-    target_y = y + target_distance * np.sin(yaw)
-    target_z = z
+    camera_position = (
+        position
+        + rotation @ camera_offset
+    )
 
-    target_position = [
-        target_x,
-        target_y,
-        target_z
-    ]
 
-    # -------------------------------------------------
-    # VIEW MATRIX
-    # -------------------------------------------------
+    # --------------------------------------------------------
+    # Camera looks forward
+    # --------------------------------------------------------
+
+    forward_vector = (
+        rotation @ np.array([
+            5.0,
+            0.0,
+            0.0
+        ])
+    )
+
+    target_position = (
+        camera_position
+        + forward_vector
+    )
+
+
+    # Camera up direction
+
+    up_vector = (
+        rotation @ np.array([
+            0.0,
+            0.0,
+            1.0
+        ])
+    )
+
+
+    # --------------------------------------------------------
+    # View matrix
+    # --------------------------------------------------------
 
     view_matrix = p.computeViewMatrix(
         cameraEyePosition=camera_position,
         cameraTargetPosition=target_position,
-        cameraUpVector=[0, 0, 1]
+        cameraUpVector=up_vector
     )
 
-    # -------------------------------------------------
-    # PROJECTION MATRIX
-    # -------------------------------------------------
+
+    # --------------------------------------------------------
+    # Projection matrix
+    # --------------------------------------------------------
 
     projection_matrix = p.computeProjectionMatrixFOV(
         fov=FOV,
-        aspect=CAMERA_WIDTH / CAMERA_HEIGHT,
-        nearVal=NEAR_PLANE,
-        farVal=FAR_PLANE
+        aspect=float(WIDTH) / float(HEIGHT),
+        nearVal=NEAR,
+        farVal=FAR
     )
 
-    # -------------------------------------------------
-    # CAPTURE IMAGE
-    # -------------------------------------------------
 
-    image = p.getCameraImage(
-        CAMERA_WIDTH,
-        CAMERA_HEIGHT,
+    # ========================================================
+    # GET RGB + DEPTH IMAGE
+    # ========================================================
+
+    _, _, rgb, depth, _ = p.getCameraImage(
+        width=WIDTH,
+        height=HEIGHT,
         viewMatrix=view_matrix,
         projectionMatrix=projection_matrix,
         renderer=p.ER_BULLET_HARDWARE_OPENGL
     )
 
-    rgba = image[2]
 
-    frame = np.array(
-        rgba,
-        dtype=np.uint8
-    )
+    # ========================================================
+    # RGB IMAGE
+    # ========================================================
 
-    # Important reshape
-    frame = frame.reshape(
-        CAMERA_HEIGHT,
-        CAMERA_WIDTH,
+    rgb = np.array(rgb)
+
+    rgb = rgb.reshape(
+        HEIGHT,
+        WIDTH,
         4
     )
 
     # Remove alpha channel
-    frame = frame[:, :, :3]
+    rgb = rgb[:, :, :3]
 
-    # RGB -> BGR for OpenCV
-    frame = cv2.cvtColor(
-        frame,
-        cv2.COLOR_RGB2BGR
+    # PyBullet → RGB
+    # OpenCV → BGR
+
+    rgb = rgb[:, :, ::-1]
+
+    # Make sure OpenCV receives uint8
+
+    rgb = rgb.astype(np.uint8)
+
+
+    # ========================================================
+    # DEPTH IMAGE
+    # ========================================================
+
+    depth = np.array(depth)
+
+    depth = depth.reshape(
+        HEIGHT,
+        WIDTH
     )
 
-    return frame
 
+    # --------------------------------------------------------
+    # Convert PyBullet depth buffer
+    # to approximate distance in metres
+    # --------------------------------------------------------
+
+    depth_meters = (
+        FAR * NEAR
+        /
+        (
+            FAR
+            - (FAR - NEAR) * depth
+        )
+    )
+
+
+    # ========================================================
+    # RETURN BOTH
+    # ========================================================
+
+    return rgb, depth_meters
+
+
+# ============================================================
+# ROBOT MOVEMENT
+# ============================================================
 
 def move_robot(ugv, speed, turn=0):
 
-    position, orientation = p.getBasePositionAndOrientation(ugv)
+    # Get current orientation
 
-    _, _, yaw = p.getEulerFromQuaternion(orientation)
+    position, orientation = p.getBasePositionAndOrientation(
+        ugv
+    )
 
-    linear_velocity = [
-        speed * np.cos(yaw),
-        speed * np.sin(yaw),
-        0
-    ]
+
+    # Convert orientation to rotation matrix
+
+    rotation = np.array(
+        p.getMatrixFromQuaternion(
+            orientation
+        )
+    ).reshape(3, 3)
+
+
+    # UGV forward direction
+
+    forward = rotation[:, 0]
+
+
+    # Calculate velocity
+
+    velocity = forward * speed
+
+
+    # Angular velocity for turning
 
     angular_velocity = [
         0,
@@ -245,17 +325,266 @@ def move_robot(ugv, speed, turn=0):
         turn
     ]
 
+
+    # Apply velocity
+
     p.resetBaseVelocity(
         ugv,
-        linearVelocity=linear_velocity,
+        linearVelocity=velocity.tolist(),
         angularVelocity=angular_velocity
     )
 
 
+# ============================================================
+# CLOSE SIMULATION
+# ============================================================
+
 def close_simulation():
 
     if p.isConnected():
+
         p.disconnect()
+
+
+
+#-------------------------------------------------------------------------------------------------------------------------------
+# # This version creates a virtual camera that follows the UGV and displays the camera feed in an OpenCV window.
+# import pybullet as p
+# import pybullet_data
+# import cv2
+# import numpy as np
+# import os
+
+
+# CAMERA_WIDTH = 640
+# CAMERA_HEIGHT = 480
+
+# FOV = 70
+# NEAR_PLANE = 0.1
+# FAR_PLANE = 50
+
+
+
+# #-----------------------------------------------Adding terrain to the simulation-------------------------------------------------
+# # Terrain loading logic now lives in terrain_utils.py so camera.py and
+# # simulation.py can't drift out of sync with each other again.
+# from terrain_utils import get_terrain_texture_id, apply_ground_terrain, create_backdrop_wall
+
+
+
+# def create_world():
+
+#     # Start PyBullet
+#     if not p.isConnected():
+#         p.connect(p.GUI)
+
+#     p.setAdditionalSearchPath(pybullet_data.getDataPath())
+
+#     p.resetSimulation()
+
+#     p.setGravity(0, 0, -9.81)
+
+#     # Ground
+#     plane_id = p.loadURDF("plane.urdf")
+
+#     # Load terrain image once (auto-resized if needed), reuse for ground + backdrop
+#     project_dir = os.path.dirname(__file__)
+#     terrain_texture_id = get_terrain_texture_id(project_dir)
+
+#     # Make the ground the UGV drives on look like real terrain
+#     apply_ground_terrain(plane_id, terrain_texture_id)
+
+#     # Distant backdrop wall with the same terrain texture
+#     create_backdrop_wall(terrain_texture_id)
+
+#     # Shadows make the scene read as 3D instead of flat CAD boxes
+#     p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
+#     # -------------------------------------------------
+#     # UGV
+#     # -------------------------------------------------
+
+#     collision_shape = p.createCollisionShape(
+#         p.GEOM_BOX,
+#         halfExtents=[1.0, 0.6, 0.2]
+#     )
+
+#     visual_shape = p.createVisualShape(
+#         p.GEOM_BOX,
+#         halfExtents=[1.0, 0.6, 0.2],
+#         rgbaColor=[0.2, 0.2, 0.8, 1]
+#     )
+
+#     ugv = p.createMultiBody(
+#         baseMass=10,
+#         baseCollisionShapeIndex=collision_shape,
+#         baseVisualShapeIndex=visual_shape,
+#         basePosition=[0, 0, 0.5]
+#     )
+
+#     # -------------------------------------------------
+#     # TEST OBSTACLES
+#     # -------------------------------------------------
+
+#     create_obstacle([5, 0, 1], [0.5, 0.5, 1])
+#     create_obstacle([8, 2, 0.75], [0.7, 0.7, 0.75])
+#     create_obstacle([8, -2, 0.75], [0.7, 0.7, 0.75])
+
+#     return ugv
+
+
+# def create_obstacle(position, half_extents):
+
+#     collision = p.createCollisionShape(
+#         p.GEOM_BOX,
+#         halfExtents=half_extents
+#     )
+
+#     visual = p.createVisualShape(
+#         p.GEOM_BOX,
+#         halfExtents=half_extents,
+#         rgbaColor=[1, 0, 0, 1]
+#     )
+
+#     obstacle = p.createMultiBody(
+#         baseMass=0,
+#         baseCollisionShapeIndex=collision,
+#         baseVisualShapeIndex=visual,
+#         basePosition=position
+#     )
+
+#     return obstacle
+
+
+# def get_camera_image(ugv):
+
+#     # Get robot position
+#     position, orientation = p.getBasePositionAndOrientation(ugv)
+
+#     # Get robot yaw
+#     _, _, yaw = p.getEulerFromQuaternion(orientation)
+
+#     x, y, z = position
+
+#     # -------------------------------------------------
+#     # CAMERA POSITION
+#     # -------------------------------------------------
+
+#     camera_distance = 0.8
+
+#     camera_x = x + camera_distance * np.cos(yaw)
+#     camera_y = y + camera_distance * np.sin(yaw)
+#     camera_z = z + 0.4
+
+#     camera_position = [
+#         camera_x,
+#         camera_y,
+#         camera_z
+#     ]
+
+#     # -------------------------------------------------
+#     # CAMERA TARGET
+#     # -------------------------------------------------
+
+#     target_distance = 5
+
+#     target_x = x + target_distance * np.cos(yaw)
+#     target_y = y + target_distance * np.sin(yaw)
+#     target_z = z
+
+#     target_position = [
+#         target_x,
+#         target_y,
+#         target_z
+#     ]
+
+#     # -------------------------------------------------
+#     # VIEW MATRIX
+#     # -------------------------------------------------
+
+#     view_matrix = p.computeViewMatrix(
+#         cameraEyePosition=camera_position,
+#         cameraTargetPosition=target_position,
+#         cameraUpVector=[0, 0, 1]
+#     )
+
+#     # -------------------------------------------------
+#     # PROJECTION MATRIX
+#     # -------------------------------------------------
+
+#     projection_matrix = p.computeProjectionMatrixFOV(
+#         fov=FOV,
+#         aspect=CAMERA_WIDTH / CAMERA_HEIGHT,
+#         nearVal=NEAR_PLANE,
+#         farVal=FAR_PLANE
+#     )
+
+#     # -------------------------------------------------
+#     # CAPTURE IMAGE
+#     # -------------------------------------------------
+
+#     image = p.getCameraImage(
+#         CAMERA_WIDTH,
+#         CAMERA_HEIGHT,
+#         viewMatrix=view_matrix,
+#         projectionMatrix=projection_matrix,
+#         renderer=p.ER_BULLET_HARDWARE_OPENGL
+#     )
+
+#     rgba = image[2]
+
+#     frame = np.array(
+#         rgba,
+#         dtype=np.uint8
+#     )
+
+#     # Important reshape
+#     frame = frame.reshape(
+#         CAMERA_HEIGHT,
+#         CAMERA_WIDTH,
+#         4
+#     )
+
+#     # Remove alpha channel
+#     frame = frame[:, :, :3]
+
+#     # RGB -> BGR for OpenCV
+#     frame = cv2.cvtColor(
+#         frame,
+#         cv2.COLOR_RGB2BGR
+#     )
+
+#     return frame
+
+
+# def move_robot(ugv, speed, turn=0):
+
+#     position, orientation = p.getBasePositionAndOrientation(ugv)
+
+#     _, _, yaw = p.getEulerFromQuaternion(orientation)
+
+#     linear_velocity = [
+#         speed * np.cos(yaw),
+#         speed * np.sin(yaw),
+#         0
+#     ]
+
+#     angular_velocity = [
+#         0,
+#         0,
+#         turn
+#     ]
+
+#     p.resetBaseVelocity(
+#         ugv,
+#         linearVelocity=linear_velocity,
+#         angularVelocity=angular_velocity
+#     )
+
+
+# def close_simulation():
+
+#     if p.isConnected():
+#         p.disconnect()
 
 
 
