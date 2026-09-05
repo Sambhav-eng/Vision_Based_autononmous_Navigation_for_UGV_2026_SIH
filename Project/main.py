@@ -35,12 +35,22 @@
 import cv2
 import pybullet as p
 
+
+# ==========================================
+# Camera
+# ==========================================
+
 from camera import (
     create_world,
     get_camera_image,
     move_robot,
     close_simulation
 )
+
+
+# ==========================================
+# Perception
+# ==========================================
 
 from perception.obstacle_detection import (
     detect_obstacles
@@ -50,12 +60,21 @@ from perception.free_space import (
     detect_free_space
 )
 
+
+# ==========================================
+# Localization
+# ==========================================
+
 from nav_core.Localization.visualization import (
     Localization
 )
 
 from nav_core.Localization.visual_odometry import (
     VisualOdometry
+)
+
+from nav_core.Localization.trajectory import (
+    TrajectoryTracker
 )
 
 
@@ -70,34 +89,47 @@ def handle_keyboard(ugv):
     speed = 0
     turn = 0
 
+    # --------------------------
     # Forward
+    # --------------------------
+
     if (
         ord("w") in keys
         and keys[ord("w")] & p.KEY_IS_DOWN
     ):
         speed = 5
 
+    # --------------------------
     # Backward
+    # --------------------------
+
     if (
         ord("s") in keys
         and keys[ord("s")] & p.KEY_IS_DOWN
     ):
         speed = -5
 
+    # --------------------------
     # Left
+    # --------------------------
+
     if (
         ord("a") in keys
         and keys[ord("a")] & p.KEY_IS_DOWN
     ):
         turn = 2
 
+    # --------------------------
     # Right
+    # --------------------------
+
     if (
         ord("d") in keys
         and keys[ord("d")] & p.KEY_IS_DOWN
     ):
         turn = -2
 
+    # Send movement command
     move_robot(
         ugv,
         speed,
@@ -106,35 +138,49 @@ def handle_keyboard(ugv):
 
 
 # ==========================================
-# Create Simulation
+# Create World
 # ==========================================
 
 ugv = create_world()
 
 
 # ==========================================
-# Initialize Localization
+# Create Localization
 # ==========================================
 
-localization = Localization(ugv)
+localization = Localization(
+    ugv
+)
 
 
 # ==========================================
-# Initialize Visual Odometry
+# Create Visual Odometry
 # ==========================================
 
 vo = VisualOdometry()
 
 
+# ==========================================
+# Create Trajectory Tracker
+# ==========================================
+
+trajectory = TrajectoryTracker()
+
+
+# ==========================================
+# Startup message
+# ==========================================
+
 print()
 print("==========================================")
-print("       UGV NAVIGATION SYSTEM")
+print("        UGV NAVIGATION SYSTEM")
 print("==========================================")
 print("Camera              : ON")
 print("Obstacle Detection  : ON")
 print("Free Space          : ON")
 print("Localization        : ON")
 print("Visual Odometry     : ON")
+print("Trajectory Tracking : ON")
 print("------------------------------------------")
 print("W = Forward")
 print("S = Backward")
@@ -153,52 +199,70 @@ try:
 
     while True:
 
-        # ----------------------------------
-        # 1. Get camera frame
-        # ----------------------------------
+        # ==================================
+        # 1. Camera
+        # ==================================
 
-        frame = get_camera_image(ugv)
+        frame = get_camera_image(
+            ugv
+        )
 
 
-        # ----------------------------------
+        # ==================================
         # 2. Visual Odometry
-        # ----------------------------------
+        # ==================================
 
         vo_x, vo_y, vo_heading = vo.update(
             frame
         )
 
 
-        # ----------------------------------
+        # ==================================
         # 3. Ground Truth Localization
-        # ----------------------------------
+        # ==================================
 
         gt_x, gt_y, gt_heading = (
             localization.update()
         )
 
 
-        # ----------------------------------
-        # 4. Obstacle Detection
-        # ----------------------------------
+        # ==================================
+        # 4. Save trajectory
+        # ==================================
+
+        trajectory.update(
+            vo_x,
+            vo_y,
+            gt_x,
+            gt_y
+        )
+
+
+        # ==================================
+        # 5. Obstacle Detection
+        # ==================================
 
         obstacle_frame, obstacle_mask = (
-            detect_obstacles(frame)
+            detect_obstacles(
+                frame
+            )
         )
 
 
-        # ----------------------------------
-        # 5. Free Space Detection
-        # ----------------------------------
+        # ==================================
+        # 6. Free Space Detection
+        # ==================================
 
         free_space_frame, free_space_mask = (
-            detect_free_space(frame)
+            detect_free_space(
+                frame
+            )
         )
 
 
-        # ----------------------------------
-        # 6. Display Visual Odometry
-        # ----------------------------------
+        # ==================================
+        # 7. Display VO
+        # ==================================
 
         cv2.putText(
             obstacle_frame,
@@ -231,9 +295,9 @@ try:
         )
 
 
-        # ----------------------------------
-        # 7. Display Ground Truth
-        # ----------------------------------
+        # ==================================
+        # 8. Display Ground Truth
+        # ==================================
 
         cv2.putText(
             obstacle_frame,
@@ -266,19 +330,29 @@ try:
         )
 
 
-        # ----------------------------------
-        # 8. Show windows
-        # ----------------------------------
+        # ==================================
+        # 9. Display Camera
+        # ==================================
 
         cv2.imshow(
             "UGV Camera - Localization + VO",
             obstacle_frame
         )
 
+
+        # ==================================
+        # 10. Display Free Space
+        # ==================================
+
         cv2.imshow(
             "Free Space",
             free_space_frame
         )
+
+
+        # ==================================
+        # 11. Display Obstacle Mask
+        # ==================================
 
         cv2.imshow(
             "Obstacle Mask",
@@ -286,32 +360,51 @@ try:
         )
 
 
-        # ----------------------------------
-        # 9. Keyboard
-        # ----------------------------------
+        # ==================================
+        # 12. Keyboard
+        # ==================================
 
         key = cv2.waitKey(1) & 0xFF
 
         if key == ord("q"):
+
             break
 
 
-        # ----------------------------------
-        # 10. Move UGV
-        # ----------------------------------
+        # ==================================
+        # 13. Move Robot
+        # ==================================
 
-        handle_keyboard(ugv)
+        handle_keyboard(
+            ugv
+        )
 
 
-        # ----------------------------------
-        # 11. Physics
-        # ----------------------------------
+        # ==================================
+        # 14. Physics
+        # ==================================
 
         p.stepSimulation()
 
 
 finally:
 
+    # ======================================
+    # Close OpenCV windows
+    # ======================================
+
     cv2.destroyAllWindows()
 
+
+    # ======================================
+    # Close PyBullet
+    # ======================================
+
     close_simulation()
+
+
+    # ======================================
+    # Show trajectory
+    # ======================================
+
+    trajectory.show()
