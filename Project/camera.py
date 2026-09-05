@@ -1,9 +1,30 @@
 #What is this file ?
+#-------------------------------------Architecture of this file --------------------------------------------------------------
+# camera.py                                                                                                                   
+# │
+# ├── create_background()
+# │
+# ├── create_world()
+# │      │
+# │      ├── Ground
+# │      ├── Background
+# │      ├── UGV
+# │      └── Obstacles
+# │
+# ├── create_obstacle()
+# │
+# ├── get_camera_image()
+# │
+# ├── move_robot()
+# │
+# └── close_simulation()
+#-------------------------------------------------------------------------------------------------------------------------------
 # This version creates a virtual camera that follows the UGV and displays the camera feed in an OpenCV window.
 import pybullet as p
 import pybullet_data
 import cv2
 import numpy as np
+import os
 
 
 CAMERA_WIDTH = 640
@@ -12,6 +33,14 @@ CAMERA_HEIGHT = 480
 FOV = 70
 NEAR_PLANE = 0.1
 FAR_PLANE = 50
+
+
+
+#-----------------------------------------------Adding terrain to the simulation-------------------------------------------------
+# Terrain loading logic now lives in terrain_utils.py so camera.py and
+# simulation.py can't drift out of sync with each other again.
+from terrain_utils import get_terrain_texture_id, apply_ground_terrain, create_backdrop_wall
+
 
 
 def create_world():
@@ -27,8 +56,20 @@ def create_world():
     p.setGravity(0, 0, -9.81)
 
     # Ground
-    p.loadURDF("plane.urdf")
+    plane_id = p.loadURDF("plane.urdf")
 
+    # Load terrain image once (auto-resized if needed), reuse for ground + backdrop
+    project_dir = os.path.dirname(__file__)
+    terrain_texture_id = get_terrain_texture_id(project_dir)
+
+    # Make the ground the UGV drives on look like real terrain
+    apply_ground_terrain(plane_id, terrain_texture_id)
+
+    # Distant backdrop wall with the same terrain texture
+    create_backdrop_wall(terrain_texture_id)
+
+    # Shadows make the scene read as 3D instead of flat CAD boxes
+    p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
     # -------------------------------------------------
     # UGV
     # -------------------------------------------------

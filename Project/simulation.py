@@ -5,6 +5,15 @@
 import pybullet as p
 import pybullet_data
 import time
+import os
+
+
+#----------------------------------Adding terrain to the simulation-------------------------------------------------
+# Terrain loading logic now lives in terrain_utils.py so camera.py and
+# simulation.py can't drift out of sync with each other again.
+from terrain_utils import get_terrain_texture_id, apply_ground_terrain, create_backdrop_wall
+
+
 
 
 # ============================================================
@@ -17,7 +26,29 @@ p.setAdditionalSearchPath(pybullet_data.getDataPath())
 
 p.setGravity(0, 0, -9.81)
 
-p.loadURDF("plane.urdf")
+
+
+plane_id = p.loadURDF("plane.urdf")
+
+# Load the terrain image once (auto-resized if needed), reuse for ground + backdrop
+project_dir = os.path.dirname(__file__)
+terrain_texture_id = get_terrain_texture_id(project_dir)
+
+# Make the ground the UGV drives on look like real terrain
+apply_ground_terrain(plane_id, terrain_texture_id)
+
+# Create distant backdrop wall using the same terrain texture
+create_backdrop_wall(terrain_texture_id)
+
+# Make it look like a real environment: shadows + a camera angle that
+# actually frames the robot and the ground instead of the default top-down view
+p.configureDebugVisualizer(p.COV_ENABLE_SHADOWS, 1)
+p.resetDebugVisualizerCamera(
+    cameraDistance=6,
+    cameraYaw=50,
+    cameraPitch=-30,
+    cameraTargetPosition=[0, 0, 0.5]
+)
 
 
 # ============================================================
@@ -221,6 +252,10 @@ print("SPACE -> Stop")
 print("Q -> Quit")
 print()
 print("======================================")
+
+
+
+
 
 
 # ============================================================
