@@ -24,6 +24,7 @@
 import pybullet as p
 import pybullet_data
 import numpy as np
+import os
 
 
 # ============================================================
@@ -42,7 +43,7 @@ FAR_PLANE = 50
 #-----------------------------------------------Adding terrain to the simulation-------------------------------------------------
 # Terrain loading logic now lives in terrain_utils.py so camera.py and
 # simulation.py can't drift out of sync with each other again.
-from terrain_utils import get_terrain_texture_id, apply_ground_terrain, create_backdrop_wall
+from terrain_utils import get_horizon_texture_id, apply_ground_terrain, create_backdrop_wall
 
 
 
@@ -61,11 +62,11 @@ def create_world():
     p.setGravity(0, 0, -9.81)
 
     # Ground
-    p.loadURDF("plane.urdf")
+    plane_id = p.loadURDF("plane.urdf")
 
     # Load terrain image once (auto-resized if needed), reuse for ground + backdrop
     project_dir = os.path.dirname(__file__)
-    terrain_texture_id = get_terrain_texture_id(project_dir)
+    terrain_texture_id = get_horizon_texture_id(project_dir)
 
     # Make the ground the UGV drives on look like real terrain
     apply_ground_terrain(plane_id, terrain_texture_id)
@@ -114,11 +115,11 @@ def create_world():
             halfExtents=[0.5, 0.5, 0.5]
         )
 
-    visual = p.createVisualShape(
-        p.GEOM_BOX,
-        halfExtents=half_extents,
-        rgbaColor=[1, 0, 0, 1]
-    )
+        visual = p.createVisualShape(
+            p.GEOM_BOX,
+            halfExtents=[0.5, 0.5, 0.5],
+            rgbaColor=[1, 0, 0, 1]
+        )
 
         p.createMultiBody(
             baseMass=0,
@@ -222,8 +223,8 @@ def get_camera_image(ugv):
     projection_matrix = p.computeProjectionMatrixFOV(
         fov=FOV,
         aspect=float(WIDTH) / float(HEIGHT),
-        nearVal=NEAR,
-        farVal=FAR
+        nearVal=NEAR_PLANE,
+        farVal=FAR_PLANE
     )
 
 
@@ -283,11 +284,11 @@ def get_camera_image(ugv):
     # --------------------------------------------------------
 
     depth_meters = (
-        FAR * NEAR
+        FAR_PLANE * NEAR_PLANE
         /
         (
-            FAR
-            - (FAR - NEAR) * depth
+            FAR_PLANE
+            - (FAR_PLANE - NEAR_PLANE) * depth
         )
     )
 
