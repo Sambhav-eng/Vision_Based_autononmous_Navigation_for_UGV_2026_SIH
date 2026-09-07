@@ -42,6 +42,7 @@ from camera import (
     close_simulation
 )
 
+# from simulation import apply_realistic_scene_settings;
 from perception.obstacle_detection import detect_obstacles
 from perception.free_space import detect_free_space
 
@@ -49,6 +50,8 @@ from nav_core.Localization.visualization import Localization
 from nav_core.Localization.visual_odometry import VisualOdometry
 from nav_core.Localization.trajectory import TrajectoryTracker
 
+
+#-------------------------------Connecting simulations.py to main.py ---------------------------------------------------------------------
 
 # ============================================================
 # KEYBOARD CONTROL
