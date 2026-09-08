@@ -47,11 +47,12 @@ class OccupancyGrid:
 
         grid_x = int(
             (x - self.origin_x) / self.resolution
-        )
+        )  
 
         grid_y = int(
             (y - self.origin_y) / self.resolution
         )
+        
 
         # Check whether point is inside map
         if (

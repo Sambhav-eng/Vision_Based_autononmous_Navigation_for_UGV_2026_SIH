@@ -1,35 +1,20 @@
-#-----------------------------------Brain ---------
-
+# ============================================================
 # main.py
-#    │
-#    ├── create simulation
-#    │
-#    ├── get camera image
-#    │
-#    ├── detect obstacles
-#    │
-#    ├── detect free space
-#    │
-#    ├── SLAM
-#    │
-#    ├── planning
-#    │
-#    └── control robot
-
-# from camera import create_world, get_camera_image
-# from perception.obstacle_detection import detect_obstacles
-# from perception.free_space import detect_free_space
-
-# ugv = create_world()
-
-# while True:
-
-#     frame = get_camera_image(ugv)
-
-#     obstacles = detect_obstacles(frame)
-
-#     free_space = detect_free_space(frame)
-
+#
+# Brain of the UGV Navigation System
+#
+# Camera
+#   ↓
+# Perception
+#   ↓
+# Localization
+#   ↓
+# Mapping
+#   ↓
+# Planning
+#   ↓
+# Control
+# ============================================================
 
 
 import cv2
@@ -42,7 +27,6 @@ from camera import (
     close_simulation
 )
 
-# from simulation import apply_realistic_scene_settings;
 from perception.obstacle_detection import detect_obstacles
 from perception.free_space import detect_free_space
 
@@ -50,8 +34,8 @@ from nav_core.Localization.visualization import Localization
 from nav_core.Localization.visual_odometry import VisualOdometry
 from nav_core.Localization.trajectory import TrajectoryTracker
 
+from nav_core.Mapping.occupancy_grid import OccupancyGrid
 
-#-------------------------------Connecting simulations.py to main.py ---------------------------------------------------------------------
 
 # ============================================================
 # KEYBOARD CONTROL
@@ -80,7 +64,11 @@ def handle_keyboard(ugv):
     if ord("d") in keys and keys[ord("d")] & p.KEY_IS_DOWN:
         turn = -2
 
-    move_robot(ugv, speed, turn)
+    move_robot(
+        ugv,
+        speed,
+        turn
+    )
 
 
 # ============================================================
@@ -100,6 +88,9 @@ vo = VisualOdometry()
 
 trajectory = TrajectoryTracker()
 
+# Mapping
+mapping = OccupancyGrid()
+
 
 # ============================================================
 # START MESSAGE
@@ -117,6 +108,7 @@ print("Free Space          : ON")
 print("Localization        : ON")
 print("Visual Odometry     : ON")
 print("Trajectory Tracking : ON")
+print("Mapping             : ON")
 print("------------------------------------------")
 print("W = Forward")
 print("S = Backward")
@@ -135,39 +127,30 @@ try:
 
     while True:
 
-        # ----------------------------------------------------
+        # ====================================================
         # CAMERA
-        # ----------------------------------------------------
+        # ====================================================
 
-        # Camera now returns TWO things:
-        #
-        # frame = RGB image
-        # depth = depth map
-        #
         frame, depth = get_camera_image(ugv)
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # VISUAL ODOMETRY
-        # ----------------------------------------------------
-
-        # For now VO still uses only RGB.
-        #
-        # Later we will modify VO to use depth.
+        # ====================================================
 
         vo_x, vo_y, vo_heading = vo.update(frame)
 
 
-        # ----------------------------------------------------
-        # GROUND TRUTH LOCALIZATION
-        # ----------------------------------------------------
+        # ====================================================
+        # LOCALIZATION
+        # ====================================================
 
         gt_x, gt_y, gt_heading = localization.update()
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # TRAJECTORY TRACKING
-        # ----------------------------------------------------
+        # ====================================================
 
         trajectory.update(
             vo_x,
@@ -177,22 +160,54 @@ try:
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # OBSTACLE DETECTION
-        # ----------------------------------------------------
+        # ====================================================
 
-        obstacle_frame, obstacle_mask = detect_obstacles(frame)
+        # detect_obstacles() now returns THREE values
 
-
-        # ----------------------------------------------------
-        # FREE SPACE DETECTION
-        # ----------------------------------------------------
-
-        free_space_frame, free_space_mask = detect_free_space(frame)
+        obstacle_frame, obstacle_mask, obstacles = detect_obstacles(
+            frame
+        )
 
 
         # ====================================================
-        # DISPLAY LOCALIZATION INFORMATION
+        # FREE SPACE DETECTION
+        # ====================================================
+
+        free_space_frame, free_space_mask = detect_free_space(
+            frame
+        )
+
+
+        # ====================================================
+        # MAPPING
+        # ====================================================
+
+        # For now we only display the mapping system.
+        #
+        # The next step will convert:
+        #
+        # obstacle pixel
+        #       +
+        # depth
+        #       +
+        # robot pose
+        #       ↓
+        # world coordinates
+        #
+        # and then place the obstacle into the occupancy grid.
+
+
+        map_image = mapping.get_map_image(
+            robot_x=gt_x,
+            robot_y=gt_y,
+            robot_heading=gt_heading
+        )
+
+
+        # ====================================================
+        # LOCALIZATION INFORMATION
         # ====================================================
 
         # Visual Odometry
@@ -265,8 +280,6 @@ try:
         # DEPTH VISUALIZATION
         # ====================================================
 
-        # Convert depth values into a displayable 0-255 image.
-
         depth_display = cv2.normalize(
             depth,
             None,
@@ -275,7 +288,9 @@ try:
             cv2.NORM_MINMAX
         )
 
-        depth_display = depth_display.astype("uint8")
+        depth_display = depth_display.astype(
+            "uint8"
+        )
 
 
         # ====================================================
@@ -300,6 +315,11 @@ try:
         cv2.imshow(
             "Depth Camera",
             depth_display
+        )
+
+        cv2.imshow(
+            "Occupancy Grid Map",
+            map_image
         )
 
 
