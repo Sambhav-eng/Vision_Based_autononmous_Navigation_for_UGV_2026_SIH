@@ -16,7 +16,7 @@
 # Control
 # ============================================================
 
-
+import numpy as np
 import cv2
 import pybullet as p
 
@@ -88,7 +88,6 @@ vo = VisualOdometry()
 
 trajectory = TrajectoryTracker()
 
-# Mapping
 mapping = OccupancyGrid()
 
 
@@ -164,8 +163,6 @@ try:
         # OBSTACLE DETECTION
         # ====================================================
 
-        # detect_obstacles() now returns THREE values
-
         obstacle_frame, obstacle_mask, obstacles = detect_obstacles(
             frame
         )
@@ -184,20 +181,78 @@ try:
         # MAPPING
         # ====================================================
 
-        # For now we only display the mapping system.
-        #
-        # The next step will convert:
-        #
-        # obstacle pixel
-        #       +
-        # depth
-        #       +
-        # robot pose
-        #       ↓
-        # world coordinates
-        #
-        # and then place the obstacle into the occupancy grid.
+        for obstacle in obstacles:
 
+            # Get bottom-center pixel
+            pixel_x, pixel_y = obstacle["bottom_center"]
+
+            # ------------------------------------------------
+            # Check pixel is inside depth image
+            # ------------------------------------------------
+
+            if (
+                pixel_x < 0
+                or pixel_x >= depth.shape[1]
+                or pixel_y < 0
+                or pixel_y >= depth.shape[0]
+            ):
+                continue
+
+
+            # ------------------------------------------------
+            # Get depth at obstacle
+            # ------------------------------------------------
+
+            obstacle_depth = float(
+                depth[pixel_y, pixel_x]
+            )
+
+
+            # ------------------------------------------------
+            # Ignore invalid depth
+            # ------------------------------------------------
+
+            if not np.isfinite(obstacle_depth):
+                continue
+
+            if obstacle_depth <= 0:
+                continue
+
+            if obstacle_depth > 20:
+                continue
+
+
+            # ------------------------------------------------
+            # Convert obstacle to world coordinates
+            # ------------------------------------------------
+
+            world_x, world_y = mapping.obstacle_to_world(
+
+                pixel_x,
+                pixel_y,
+
+                obstacle_depth,
+
+                gt_x,
+                gt_y,
+                gt_heading
+            )
+
+
+            # ------------------------------------------------
+            # Add obstacle to occupancy grid
+            # ------------------------------------------------
+
+            mapping.mark_obstacle_area(
+                world_x,
+                world_y,
+                radius=0.3
+            )
+
+
+        # ====================================================
+        # CREATE MAP IMAGE
+        # ====================================================
 
         map_image = mapping.get_map_image(
             robot_x=gt_x,
@@ -335,11 +390,17 @@ try:
             break
 
 
-        # Robot movement
+        # ====================================================
+        # ROBOT MOVEMENT
+        # ====================================================
+
         handle_keyboard(ugv)
 
 
-        # Physics
+        # ====================================================
+        # PHYSICS
+        # ====================================================
+
         p.stepSimulation()
 
 
@@ -352,7 +413,5 @@ finally:
     cv2.destroyAllWindows()
 
     close_simulation()
-
-    # Show trajectory after quitting
 
     trajectory.show()
