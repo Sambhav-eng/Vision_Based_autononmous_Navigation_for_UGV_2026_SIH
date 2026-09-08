@@ -92,6 +92,194 @@ mapping = OccupancyGrid()
 
 
 # ============================================================
+# TEMPORAL OBSTACLE TRACKING
+#
+# These tracks are temporary.
+#
+# The occupancy grid remains persistent.
+# ============================================================
+
+obstacle_tracks = []
+
+
+# Maximum distance between two detections for them
+# to be considered the same physical obstacle.
+TRACK_DISTANCE_THRESHOLD = 0.7
+
+
+# Exponential smoothing factor.
+#
+# Smaller value:
+#   More stable
+#   Slower response
+#
+# Larger value:
+#   Faster response
+#   More sensitive to noise
+#
+SMOOTHING_ALPHA = 0.2
+
+
+# Minimum number of observations before an
+# obstacle is considered stable.
+MIN_OBSERVATIONS = 5
+
+
+# ============================================================
+# UPDATE OBSTACLE TRACKS
+# ============================================================
+
+def update_obstacle_tracks(
+    detections
+):
+    """
+    detections:
+        List of world coordinates:
+        [(x1, y1), (x2, y2), ...]
+
+    The function does NOT clear the occupancy grid.
+
+    It maintains temporary obstacle tracks so that
+    noisy frame-to-frame measurements do not create
+    smeared obstacle trails.
+    """
+
+    for x, y in detections:
+
+        best_track = None
+        best_distance = float("inf")
+
+        # ----------------------------------------------------
+        # Find closest existing UNCONFIRMED track
+        # ----------------------------------------------------
+
+        for track in obstacle_tracks:
+
+            # IMPORTANT:
+            #
+            # Confirmed tracks are already stored in the
+            # persistent map. We do not move them anymore.
+            #
+            if track["confirmed"]:
+                continue
+
+            distance = np.sqrt(
+                (x - track["x"]) ** 2
+                +
+                (y - track["y"]) ** 2
+            )
+
+            if (
+                distance < TRACK_DISTANCE_THRESHOLD
+                and distance < best_distance
+            ):
+
+                best_track = track
+                best_distance = distance
+
+
+        # ----------------------------------------------------
+        # Existing track
+        # ----------------------------------------------------
+
+        if best_track is not None:
+
+            # Smooth X position
+            best_track["x"] = (
+                (1 - SMOOTHING_ALPHA)
+                * best_track["x"]
+                +
+                SMOOTHING_ALPHA
+                * x
+            )
+
+            # Smooth Y position
+            best_track["y"] = (
+                (1 - SMOOTHING_ALPHA)
+                * best_track["y"]
+                +
+                SMOOTHING_ALPHA
+                * y
+            )
+
+            best_track["observations"] += 1
+
+
+        # ----------------------------------------------------
+        # New track
+        # ----------------------------------------------------
+
+        else:
+
+            obstacle_tracks.append(
+                {
+                    "x": x,
+                    "y": y,
+                    "observations": 1,
+
+                    # False means this obstacle has NOT
+                    # yet been permanently inserted.
+                    "confirmed": False
+                }
+            )
+
+
+# ============================================================
+# CONFIRM STABLE OBSTACLES
+# ============================================================
+
+def commit_stable_obstacles():
+
+    for track in obstacle_tracks:
+
+        # ----------------------------------------------------
+        # IMPORTANT:
+        #
+        # If already confirmed, do nothing.
+        #
+        # This prevents the same moving/smoothed track from
+        # being painted repeatedly into the persistent map.
+        # ----------------------------------------------------
+
+        if track["confirmed"]:
+            continue
+
+
+        # ----------------------------------------------------
+        # Wait for enough observations
+        # ----------------------------------------------------
+
+        if (
+            track["observations"]
+            >= MIN_OBSERVATIONS
+        ):
+
+            # ----------------------------------------------
+            # Mark track as confirmed
+            # ----------------------------------------------
+
+            track["confirmed"] = True
+
+
+            # ----------------------------------------------
+            # Write to persistent map ONLY ONCE
+            # ----------------------------------------------
+
+            mapping.mark_obstacle_area(
+                track["x"],
+                track["y"],
+                radius=0.3
+            )
+
+
+            print(
+                f"[MAPPING] Obstacle confirmed: "
+                f"X={track['x']:.2f}, "
+                f"Y={track['y']:.2f}"
+            )
+
+
+# ============================================================
 # START MESSAGE
 # ============================================================
 
@@ -108,6 +296,8 @@ print("Localization        : ON")
 print("Visual Odometry     : ON")
 print("Trajectory Tracking : ON")
 print("Mapping             : ON")
+print("Persistent Mapping  : ON")
+print("Temporal Filtering  : ON")
 print("------------------------------------------")
 print("W = Forward")
 print("S = Backward")
@@ -130,14 +320,18 @@ try:
         # CAMERA
         # ====================================================
 
-        frame, depth = get_camera_image(ugv)
+        frame, depth = get_camera_image(
+            ugv
+        )
 
 
         # ====================================================
         # VISUAL ODOMETRY
         # ====================================================
 
-        vo_x, vo_y, vo_heading = vo.update(frame)
+        vo_x, vo_y, vo_heading = vo.update(
+            frame
+        )
 
 
         # ====================================================
@@ -179,12 +373,28 @@ try:
 
         # ====================================================
         # MAPPING
+        #
+        # IMPORTANT:
+        #
+        # We first calculate world-coordinate observations.
+        #
+        # We do NOT immediately write them to the
+        # persistent occupancy grid.
         # ====================================================
+
+        world_obstacles = []
+
 
         for obstacle in obstacles:
 
+            # ------------------------------------------------
             # Get bottom-center pixel
-            pixel_x, pixel_y = obstacle["bottom_center"]
+            # ------------------------------------------------
+
+            pixel_x, pixel_y = obstacle[
+                "bottom_center"
+            ]
+
 
             # ------------------------------------------------
             # Check pixel is inside depth image
@@ -200,11 +410,14 @@ try:
 
 
             # ------------------------------------------------
-            # Get depth at obstacle
+            # Get depth
             # ------------------------------------------------
 
             obstacle_depth = float(
-                depth[pixel_y, pixel_x]
+                depth[
+                    pixel_y,
+                    pixel_x
+                ]
             )
 
 
@@ -212,7 +425,9 @@ try:
             # Ignore invalid depth
             # ------------------------------------------------
 
-            if not np.isfinite(obstacle_depth):
+            if not np.isfinite(
+                obstacle_depth
+            ):
                 continue
 
             if obstacle_depth <= 0:
@@ -223,7 +438,7 @@ try:
 
 
             # ------------------------------------------------
-            # Convert obstacle to world coordinates
+            # Convert pixel + depth into world coordinates
             # ------------------------------------------------
 
             world_x, world_y = mapping.obstacle_to_world(
@@ -240,14 +455,33 @@ try:
 
 
             # ------------------------------------------------
-            # Add obstacle to occupancy grid
+            # Store observation
+            #
+            # This is temporary.
             # ------------------------------------------------
 
-            mapping.mark_obstacle_area(
-                world_x,
-                world_y,
-                radius=0.3
+            world_obstacles.append(
+                (
+                    world_x,
+                    world_y
+                )
             )
+
+
+        # ====================================================
+        # TEMPORAL FILTER
+        # ====================================================
+
+        update_obstacle_tracks(
+            world_obstacles
+        )
+
+
+        # ====================================================
+        # CONFIRM STABLE OBSTACLES
+        # ====================================================
+
+        commit_stable_obstacles()
 
 
         # ====================================================
@@ -265,7 +499,9 @@ try:
         # LOCALIZATION INFORMATION
         # ====================================================
 
+        # ----------------------------------------------------
         # Visual Odometry
+        # ----------------------------------------------------
 
         cv2.putText(
             obstacle_frame,
@@ -298,7 +534,9 @@ try:
         )
 
 
+        # ----------------------------------------------------
         # Ground Truth
+        # ----------------------------------------------------
 
         cv2.putText(
             obstacle_frame,
@@ -327,6 +565,37 @@ try:
             cv2.FONT_HERSHEY_SIMPLEX,
             0.7,
             (0, 255, 255),
+            2
+        )
+
+
+        # ====================================================
+        # MAPPING INFORMATION
+        # ====================================================
+
+        confirmed_count = sum(
+            1
+            for track in obstacle_tracks
+            if track["confirmed"]
+        )
+
+        cv2.putText(
+            obstacle_frame,
+            f"Tracks: {len(obstacle_tracks)}",
+            (20, 160),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
+            2
+        )
+
+        cv2.putText(
+            obstacle_frame,
+            f"Confirmed: {confirmed_count}",
+            (20, 190),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (255, 255, 255),
             2
         )
 
@@ -385,7 +654,10 @@ try:
         key = cv2.waitKey(1) & 0xFF
 
 
+        # ----------------------------------------------------
         # Quit
+        # ----------------------------------------------------
+
         if key == ord("q"):
             break
 
@@ -394,7 +666,9 @@ try:
         # ROBOT MOVEMENT
         # ====================================================
 
-        handle_keyboard(ugv)
+        handle_keyboard(
+            ugv
+        )
 
 
         # ====================================================
