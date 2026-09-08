@@ -52,7 +52,7 @@ class OccupancyGrid:
         grid_y = int(
             (y - self.origin_y) / self.resolution
         )
-        
+
 
         # Check whether point is inside map
         if (
@@ -177,6 +177,128 @@ class OccupancyGrid:
             x,
             y
         )
+
+        # ---------------------------------------------------------
+    # Convert camera pixel + depth to world coordinates
+    # -------------------------------------------------------
+    #     # Camera
+    #   ↓
+    # pixel + depth
+    #   ↓
+    # camera coordinates
+    #   ↓
+    # UGV coordinates
+    #   ↓
+    # world coordinates
+
+    def obstacle_to_world(
+        self,
+        pixel_x,
+        pixel_y,
+        depth,
+        robot_x,
+        robot_y,
+        robot_heading,
+        image_width=640,
+        image_height=480,
+        fov=70,
+        camera_height=0.4,
+        camera_forward_offset=0.8
+    ):
+        """
+        Convert an obstacle detected in the camera image
+        into approximate world coordinates.
+
+        pixel_x, pixel_y:
+            Obstacle pixel coordinates.
+
+        depth:
+            Depth value at that pixel in meters.
+
+        robot_x, robot_y:
+            Current UGV position.
+
+        robot_heading:
+            Current UGV heading in radians.
+        """
+
+        # -----------------------------------------------------
+        # Camera parameters
+        # -----------------------------------------------------
+
+        cx = image_width / 2
+        cy = image_height / 2
+
+        # PyBullet FOV is treated as vertical FOV here
+        fy = (
+            image_height / 2
+        ) / np.tan(
+            np.radians(fov / 2)
+        )
+
+        fx = fy * (
+            image_width / image_height
+        )
+
+        # -----------------------------------------------------
+        # Pixel -> camera coordinates
+        # -----------------------------------------------------
+
+        # Horizontal displacement
+        camera_right = (
+            (pixel_x - cx)
+            * depth
+            / fx
+        )
+
+        # Vertical displacement
+        camera_vertical = (
+            (pixel_y - cy)
+            * depth
+            / fy
+        )
+
+        # Forward distance
+        camera_forward = depth
+
+        # -----------------------------------------------------
+        # Camera -> robot coordinates
+        #
+        # Robot coordinate system:
+        #
+        #       +X = forward
+        #       +Y = right
+        #       +Z = up
+        # -----------------------------------------------------
+
+        robot_forward = (
+            camera_forward
+            + camera_forward_offset
+        )
+
+        robot_right = camera_right
+
+        # -----------------------------------------------------
+        # Robot -> world coordinates
+        # -----------------------------------------------------
+
+        world_x = (
+            robot_x
+            + robot_forward
+            * np.cos(robot_heading)
+            - robot_right
+            * np.sin(robot_heading)
+        )
+
+        world_y = (
+            robot_y
+            + robot_forward
+            * np.sin(robot_heading)
+            + robot_right
+            * np.cos(robot_heading)
+        )
+
+        return world_x, world_y
 
     # ---------------------------------------------------------
     # Create visualization of map
